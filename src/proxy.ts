@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 // Runs on every request. Its only job is to keep the user's login
 // session fresh so they don't get randomly logged out. You shouldn't
 // need to edit this file.
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
