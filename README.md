@@ -88,7 +88,7 @@ src/
       admin.ts             Service-role client + ADMIN_EMAILS check, server-only
     types.ts               Shared TypeScript types
 supabase/
-  schema.sql               Run this once in the Supabase SQL editor
+  schema.sql               Run this once in the Supabase SQL editorrr
 scripts/
   seed.mjs                 Loads sample opportunities into your database
 ```
