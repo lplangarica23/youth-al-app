@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 import { Opportunity } from "@/lib/types";
+import { withRetry } from "@/lib/retry";
 
 const SYSTEM_PROMPT = `You are the youth.al assistant, helping young Albanians find real opportunities (volunteering, Erasmus+/jobs, NGO activities). You speak Albanian, warmly and simply, like a helpful friend — not a corporate chatbot.
 
@@ -85,14 +86,7 @@ export async function POST(request: Request) {
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: `${SYSTEM_PROMPT}\n\nAVAILABLE_OPPORTUNITIES:\n${JSON.stringify(catalog)}\n\nUSER_PROFILE (may be incomplete):\n${JSON.stringify(profile ?? {})}`,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-      },
-    });
+    const systemInstruction = `${SYSTEM_PROMPT}\n\nAVAILABLE_OPPORTUNITIES:\n${JSON.stringify(catalog)}\n\nUSER_PROFILE (may be incomplete):\n${JSON.stringify(profile ?? {})}`;
 
     const conversationHistory = Array.isArray(history)
       ? history.slice(-10, -1).map((h: { role: string; content: string }) => ({
@@ -101,9 +95,45 @@ export async function POST(request: Request) {
         }))
       : [];
 
-    const chat = model.startChat({ history: conversationHistory });
-    const result = await chat.sendMessage(message.slice(0, 1000));
-    const parsed = JSON.parse(result.response.text()) as {
+    // Google renames/retires Gemini models fast (this exact string
+    // already broke once). If these start erroring with a 404 "model
+    // not found/no longer available," check the current list at
+    // https://ai.google.dev/gemini-api/docs/models and swap the
+    // strings below — nothing else in this file needs to change.
+    //
+    // Two models, in order: if the first is overloaded (503), fall
+    // back to the second automatically instead of just failing —
+    // demand spikes tend to hit one specific model at a time, not
+    // every model simultaneously.
+    const MODEL_CANDIDATES = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
+
+    let responseText: string | undefined;
+    let lastError: unknown;
+
+    for (const modelName of MODEL_CANDIDATES) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction,
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: RESPONSE_SCHEMA,
+          },
+        });
+        const chat = model.startChat({ history: conversationHistory });
+        const result = await withRetry(() => chat.sendMessage(message.slice(0, 1000)));
+        responseText = result.response.text();
+        break;
+      } catch (err) {
+        lastError = err;
+        const status = (err as { status?: number })?.status;
+        if (status !== 503) throw err; // only fall through to the next model on overload
+        console.warn(`${modelName} overloaded, trying next model...`);
+      }
+    }
+
+    if (responseText === undefined) throw lastError;
+    const parsed = JSON.parse(responseText) as {
       reply_al: string;
       opportunity_ids: string[];
     };
@@ -122,9 +152,11 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error("Chat failed:", err);
-    return NextResponse.json(
-      { error: "Diçka shkoi keq. Provo përsëri." },
-      { status: 500 }
-    );
+    const status = (err as { status?: number })?.status;
+    const message =
+      status === 503
+        ? "Serverat e AI-së janë të ngarkuar për momentin. Provo përsëri për pak sekonda."
+        : "Diçka shkoi keq. Provo përsëri.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

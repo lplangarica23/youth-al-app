@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
+import { withRetry } from "@/lib/retry";
 
 const SYSTEM_PROMPT = `You extract structured job/volunteering/opportunity listings from raw, messy social media post text (often Albanian, sometimes mixed Albanian/English, often with emoji and hashtags).
 
@@ -75,24 +76,52 @@ export async function POST(request: Request) {
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: RESPONSE_SCHEMA,
-      },
-    });
 
-    const result = await model.generateContent(text.slice(0, 4000));
-    const parsed = JSON.parse(result.response.text());
+    // Google renames/retires Gemini models fast (this exact string
+    // already broke once). If these start erroring with a 404 "model
+    // not found/no longer available," check the current list at
+    // https://ai.google.dev/gemini-api/docs/models and swap the
+    // strings below — nothing else in this file needs to change.
+    //
+    // Two models, in order: if the first is overloaded (503), fall
+    // back to the second automatically instead of just failing.
+    const MODEL_CANDIDATES = ["gemini-3.5-flash", "gemini-3.5-flash-lite"];
+
+    let responseText: string | undefined;
+    let lastError: unknown;
+
+    for (const modelName of MODEL_CANDIDATES) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          systemInstruction: SYSTEM_PROMPT,
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: RESPONSE_SCHEMA,
+          },
+        });
+        const result = await withRetry(() => model.generateContent(text.slice(0, 4000)));
+        responseText = result.response.text();
+        break;
+      } catch (err) {
+        lastError = err;
+        const status = (err as { status?: number })?.status;
+        if (status !== 503) throw err;
+        console.warn(`${modelName} overloaded, trying next model...`);
+      }
+    }
+
+    if (responseText === undefined) throw lastError;
+    const parsed = JSON.parse(responseText);
 
     return NextResponse.json({ draft: parsed });
   } catch (err) {
     console.error("AI parse failed:", err);
-    return NextResponse.json(
-      { error: "AI nuk arriti të lexojë tekstin. Provo përsëri, ose plotëso manualisht." },
-      { status: 500 }
-    );
+    const status = (err as { status?: number })?.status;
+    const message =
+      status === 503
+        ? "Serverat e AI-së janë të ngarkuar për momentin. Provo përsëri për pak sekonda."
+        : "AI nuk arriti të lexojë tekstin. Provo përsëri, ose plotëso manualisht.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
