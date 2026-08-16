@@ -34,7 +34,7 @@ export default async function SwipePage() {
     ]);
     profile = profileData as typeof profile;
     savedCategoryCounts = countSavedCategories(
-      (savedData as { opportunities: { category: Category } | null }[]) ?? []
+      (savedData as unknown as { opportunities: { category: Category } | null }[]) ?? []
     );
   }
 

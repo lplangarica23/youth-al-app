@@ -52,7 +52,7 @@ export default async function SearchPage({
         .eq("user_id", user.id),
     ]);
     profile = profileData as typeof profile;
-    const saved = (savedData as { opportunity_id: string; opportunities: { category: Category } | null }[]) ?? [];
+    const saved = (savedData as unknown as { opportunity_id: string; opportunities: { category: Category } | null }[]) ?? [];
     savedCategoryCounts = countSavedCategories(saved);
     savedIds = new Set(saved.map((s) => s.opportunity_id));
   }
