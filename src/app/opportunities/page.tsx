@@ -5,6 +5,10 @@ import { Opportunity } from "@/lib/types";
 export default async function OpportunitiesPage() {
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const { data, error } = await supabase
     .from("opportunities")
     .select("*")
@@ -19,12 +23,25 @@ export default async function OpportunitiesPage() {
 
   const opportunities = (data as Opportunity[]) ?? [];
 
+  let savedIds: string[] = [];
+  if (user) {
+    const { data: savedData } = await supabase
+      .from("saved_opportunities")
+      .select("opportunity_id")
+      .eq("user_id", user.id);
+    savedIds = (savedData ?? []).map((s) => s.opportunity_id as string);
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-16">
       <h1 className="mb-9 text-3xl font-extrabold sm:text-4xl">
         Mundësitë e fundit
       </h1>
-      <OpportunitiesBrowser opportunities={opportunities} />
+      <OpportunitiesBrowser
+        opportunities={opportunities}
+        userId={user?.id ?? null}
+        savedIds={savedIds}
+      />
     </main>
   );
 }

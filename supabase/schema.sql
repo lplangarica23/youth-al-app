@@ -98,3 +98,73 @@ create policy "Users can unsave their own saved opportunities"
 -- Helpful index for the common "browse approved, newest first" query.
 create index if not exists opportunities_status_created_idx
   on opportunities (status, created_at desc);
+
+
+-- ============================================================
+-- PIVOT UPDATE: single search + personalization
+-- Run this block once, after the schema above already exists.
+-- ============================================================
+
+-- Extend profiles with the 3-tap onboarding fields.
+alter table profiles add column if not exists interests text[] default '{}';
+alter table profiles add column if not exists city text;
+alter table profiles add column if not exists purpose text;
+
+-- Full-text search: a generated column combining every searchable
+-- field, kept automatically in sync by Postgres whenever a row
+-- changes — no application code needs to maintain this.
+alter table opportunities add column if not exists search_doc tsvector
+  generated always as (
+    setweight(to_tsvector('simple', coalesce(title_al, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(title_en, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(org, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(location_al, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(location_en, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(description_al, '')), 'C') ||
+    setweight(to_tsvector('simple', coalesce(description_en, '')), 'C')
+  ) stored;
+
+create index if not exists opportunities_search_doc_idx
+  on opportunities using gin (search_doc);
+
+
+-- ============================================================
+-- UPDATE: structured eligibility + trust/verification fields
+-- Run this block once, after everything above already exists.
+-- This is the "Eligibility Engine" and "Trust" system from the
+-- youth.al strategy doc — deterministic structured fields the AI
+-- reasons over, not a black-box score.
+-- ============================================================
+
+alter table opportunities add column if not exists min_age int;
+alter table opportunities add column if not exists max_age int;
+alter table opportunities add column if not exists requires_experience boolean default false;
+alter table opportunities add column if not exists travel_funded boolean default false;
+alter table opportunities add column if not exists accommodation_funded boolean default false;
+alter table opportunities add column if not exists food_funded boolean default false;
+alter table opportunities add column if not exists participation_fee text default 'E panjohur';
+
+alter table opportunities add column if not exists verification_status text
+  default 'needs_verification'
+  check (verification_status in ('verified', 'needs_verification', 'expired', 'community_reported'));
+alter table opportunities add column if not exists last_verified_at timestamptz default now();
+
+-- Richer profile fields needed for eligibility matching (age range,
+-- experience-required checks). Still just a handful of fields —
+-- the doc's "conversational AI builds this" version is a later phase.
+alter table profiles add column if not exists age int;
+alter table profiles add column if not exists experience_level text
+  check (experience_level in ('none', 'some', 'experienced'));
+
+
+-- ============================================================
+-- UPDATE: lightweight application tracker
+-- Run this block once, after everything above already exists.
+-- This is a small, scoped version of the "Opportunity Journey" /
+-- Application Copilot idea from the strategy doc — just a status
+-- field per saved opportunity, not a full guided application flow.
+-- ============================================================
+
+alter table saved_opportunities add column if not exists application_status text
+  default 'saved'
+  check (application_status in ('saved', 'applying', 'applied'));

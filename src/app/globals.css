@@ -4,8 +4,6 @@
 @tailwind components;
 @tailwind utilities;
 
-
-
 :root {
   --acid: #d4ff3d;
   --pink: #ff2e93;

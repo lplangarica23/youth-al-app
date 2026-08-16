@@ -13,8 +13,12 @@ const FILTERS: { key: Category | "all"; label: string }[] = [
 
 export default function OpportunitiesBrowser({
   opportunities,
+  userId,
+  savedIds,
 }: {
   opportunities: Opportunity[];
+  userId?: string | null;
+  savedIds?: string[];
 }) {
   const [filter, setFilter] = useState<Category | "all">("all");
   const [query, setQuery] = useState("");
@@ -62,7 +66,12 @@ export default function OpportunitiesBrowser({
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((op) => (
-            <OpportunityCard key={op.id} op={op} />
+            <OpportunityCard
+              key={op.id}
+              op={op}
+              userId={userId}
+              initiallySaved={savedIds?.includes(op.id)}
+            />
           ))}
         </div>
       )}

@@ -4,15 +4,6 @@ import { useRef, useState } from "react";
 import { Opportunity } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
 function burstConfetti(originX: number, originY: number) {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const colors = ["#D4FF3D", "#FF2E93", "#FF6B2C", "#FFFFFF"];
@@ -50,7 +41,7 @@ export default function SwipeStack({
   opportunities: Opportunity[];
   userId: string | null;
 }) {
-  const [queue, setQueue] = useState(() => shuffle(opportunities));
+  const [queue, setQueue] = useState(opportunities);
   const [saved, setSaved] = useState(0);
   const [streak, setStreak] = useState(0);
   const dragState = useRef<{ startX: number; startY: number; dragging: boolean }>({
@@ -124,7 +115,7 @@ export default function SwipeStack({
   }
 
   function restart() {
-    setQueue(shuffle(opportunities));
+    setQueue(opportunities);
   }
 
   return (

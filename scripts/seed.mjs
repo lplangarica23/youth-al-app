@@ -34,6 +34,14 @@ const OPPORTUNITIES = [
     description_en:
       "A week-long intercultural exchange on active citizenship, with accommodation and travel fully covered by the Erasmus+ programme.",
     link: "#",
+    min_age: 18,
+    max_age: 30,
+    requires_experience: false,
+    travel_funded: true,
+    accommodation_funded: true,
+    food_funded: true,
+    participation_fee: "€0",
+    verification_status: "verified",
     status: "approved",
   },
   {
@@ -49,6 +57,14 @@ const OPPORTUNITIES = [
     description_en:
       "Help run educational activities for children on environmental protection and recycling, every weekend.",
     link: "#",
+    min_age: 16,
+    max_age: null,
+    requires_experience: false,
+    travel_funded: false,
+    accommodation_funded: false,
+    food_funded: false,
+    participation_fee: "Falas",
+    verification_status: "verified",
     status: "approved",
   },
   {
@@ -64,6 +80,14 @@ const OPPORTUNITIES = [
     description_en:
       "A 6-week internship with the legal team, open to law or social science students.",
     link: "#",
+    min_age: 20,
+    max_age: null,
+    requires_experience: true,
+    travel_funded: false,
+    accommodation_funded: false,
+    food_funded: false,
+    participation_fee: "€0",
+    verification_status: "needs_verification",
     status: "approved",
   },
   {
@@ -79,6 +103,14 @@ const OPPORTUNITIES = [
     description_en:
       "A training course for young community leaders on project management and NGO work.",
     link: "#",
+    min_age: 18,
+    max_age: 30,
+    requires_experience: true,
+    travel_funded: true,
+    accommodation_funded: true,
+    food_funded: false,
+    participation_fee: "€0",
+    verification_status: "verified",
     status: "approved",
   },
   {
@@ -94,6 +126,14 @@ const OPPORTUNITIES = [
     description_en:
       "Daily care for sheltered animals: feeding, walking, and helping at adoption events.",
     link: "#",
+    min_age: 16,
+    max_age: null,
+    requires_experience: false,
+    travel_funded: false,
+    accommodation_funded: false,
+    food_funded: false,
+    participation_fee: "Falas",
+    verification_status: "verified",
     status: "approved",
   },
   {
@@ -109,9 +149,33 @@ const OPPORTUNITIES = [
     description_en:
       "Help coordinate event logistics, from attendee registration to stage management.",
     link: "#",
+    min_age: 18,
+    max_age: null,
+    requires_experience: false,
+    travel_funded: false,
+    accommodation_funded: false,
+    food_funded: true,
+    participation_fee: "Falas",
+    verification_status: "needs_verification",
     status: "approved",
   },
 ];
+
+// Idempotent: remove any previous copies of these exact sample listings
+// before inserting fresh ones, so running this script more than once
+// (e.g. after downloading an updated version of the project) never
+// creates duplicates. This only ever touches rows matching these exact
+// sample titles — it will never delete real submitted/approved data.
+const sampleTitles = OPPORTUNITIES.map((o) => o.title_al);
+const { error: deleteError } = await supabase
+  .from("opportunities")
+  .delete()
+  .in("title_al", sampleTitles);
+
+if (deleteError) {
+  console.error("Could not clear old sample data first:", deleteError.message);
+  process.exit(1);
+}
 
 const { data, error } = await supabase
   .from("opportunities")

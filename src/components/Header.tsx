@@ -1,6 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
+const NAV_LINKS = [
+  { href: "/search", label: "Kërko" },
+  { href: "/swipe", label: "Swipe Mode" },
+  { href: "/saved", label: "Të Ruajturat" },
+  { href: "/opportunities", label: "Shfleto të gjitha" },
+  { href: "/submit", label: "Shto Mundësi" },
+];
+
 export default async function Header() {
   const supabase = await createClient();
   const {
@@ -15,28 +23,83 @@ export default async function Header() {
         </Link>
 
         <div className="hidden items-center gap-7 text-sm font-semibold text-inksoft md:flex">
-          <Link href="/opportunities" className="hover:text-ink">
-            Mundësitë
-          </Link>
-          <Link href="/swipe" className="hover:text-ink">
-            Swipe Mode
-          </Link>
-          <Link href="/submit" className="hover:text-ink">
-            Shto Mundësi
-          </Link>
+          {NAV_LINKS.map((link) => (
+            <Link key={link.href} href={link.href} className="hover:text-ink">
+              {link.label}
+            </Link>
+          ))}
         </div>
 
-        {user ? (
-          <form action="/auth/signout" method="post">
-            <button className="btn-ghost" type="submit">
-              {user.email?.split("@")[0]}, dil
-            </button>
-          </form>
-        ) : (
-          <Link href="/login" className="btn-primary">
-            Fillo
-          </Link>
-        )}
+        <div className="flex items-center gap-3">
+          {user ? (
+            <details className="relative hidden md:block">
+              <summary className="btn-ghost cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                {user.email?.split("@")[0]} ▾
+              </summary>
+              <div className="absolute right-0 top-[calc(100%+10px)] flex w-48 flex-col gap-1 rounded-2xl border-2 border-white/20 bg-panel p-3 shadow-[6px_6px_0_rgba(0,0,0,0.6)]">
+                <Link
+                  href="/profile"
+                  className="rounded-lg px-3 py-2 font-semibold text-ink hover:bg-white/5"
+                >
+                  Profili
+                </Link>
+                <form action="/auth/signout" method="post">
+                  <button
+                    className="w-full rounded-lg px-3 py-2 text-left font-semibold text-pink hover:bg-white/5"
+                    type="submit"
+                  >
+                    Dil
+                  </button>
+                </form>
+              </div>
+            </details>
+          ) : (
+            <Link href="/login" className="hidden btn-primary md:inline-flex">
+              Fillo
+            </Link>
+          )}
+
+          {/* Mobile menu — native <details>, no client JS needed */}
+          <details className="relative md:hidden">
+            <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border-2 border-white/20 [&::-webkit-details-marker]:hidden">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </summary>
+            <div className="absolute right-0 top-[calc(100%+10px)] flex w-56 flex-col gap-1 rounded-2xl border-2 border-white/20 bg-panel p-3 shadow-[6px_6px_0_rgba(0,0,0,0.6)]">
+              {NAV_LINKS.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-lg px-3 py-2 font-semibold text-ink hover:bg-white/5"
+                >
+                  {link.label}
+                </Link>
+              ))}
+              {user ? (
+                <>
+                  <Link
+                    href="/profile"
+                    className="rounded-lg px-3 py-2 font-semibold text-ink hover:bg-white/5"
+                  >
+                    Profili
+                  </Link>
+                  <form action="/auth/signout" method="post">
+                    <button className="btn-ghost mt-2 w-full justify-center" type="submit">
+                      Dil
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <Link href="/login" className="btn-primary mt-2 justify-center">
+                  Fillo
+                </Link>
+              )}
+            </div>
+          </details>
+        </div>
       </nav>
     </header>
   );
