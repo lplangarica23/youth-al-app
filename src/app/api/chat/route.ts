@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 import { Opportunity } from "@/lib/types";
 
@@ -13,14 +13,16 @@ Hard rules, never break these:
 - Recommend at most 5 opportunities, ranked by actual fit, not just the first ones you see.
 - If the person's message isn't really about finding an opportunity (small talk, an unrelated question), respond warmly and briefly, and gently steer back to what they might be looking for — with an empty opportunity_ids array if nothing fits.
 - Keep replies short — 2-4 sentences. This is a chat, not an essay.
+- This applies to every single message in the conversation, including casual or slangy follow-ups like "does this one fit me?" or "anything else?"`;
 
-This applies to every single message in the conversation, including casual or slangy follow-ups like "does this one fit me?" or "anything else?" — always respond with the same JSON shape, never with plain conversational text, no matter how informal the person's message is.
-
-Respond ONLY with valid JSON, no other text, in exactly this shape:
-{
-  "reply_al": string,
-  "opportunity_ids": string[]
-}`;
+const RESPONSE_SCHEMA = {
+  type: SchemaType.OBJECT,
+  properties: {
+    reply_al: { type: SchemaType.STRING },
+    opportunity_ids: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+  },
+  required: ["reply_al", "opportunity_ids"],
+};
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -28,8 +30,9 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Gated behind login — this makes a real, paid API call per message,
-  // and an open endpoint is an easy target for automated abuse.
+  // Gated behind login — real API usage per message, and an open
+  // endpoint is an easy target for automated abuse even on a free tier
+  // (free tiers have daily caps too).
   if (!user) {
     return NextResponse.json({ error: "Duhet të jesh i loguar." }, { status: 401 });
   }
@@ -39,9 +42,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Mesazhi është bosh." }, { status: 400 });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
-      { error: "AI chat nuk është konfiguruar (mungon ANTHROPIC_API_KEY)." },
+      { error: "AI chat nuk është konfiguruar (mungon GEMINI_API_KEY)." },
       { status: 500 }
     );
   }
@@ -49,9 +52,8 @@ export async function POST(request: Request) {
   // Fetch the real, current catalog. At today's small scale, sending
   // the whole approved list as context is simple and works well. As
   // the catalog grows into the hundreds/thousands, this should become
-  // a retrieval step (e.g. pre-filter by category/text search first)
-  // rather than sending everything on every message — a real scaling
-  // task for later, not a problem yet at launch size.
+  // a retrieval step rather than sending everything on every message —
+  // a real scaling task for later, not a problem yet at launch size.
   const { data: opportunities } = await supabase
     .from("opportunities")
     .select("*")
@@ -75,61 +77,36 @@ export async function POST(request: Request) {
     description_al: op.description_al?.slice(0, 200),
   }));
 
-  // Light personalization context, same fields the rest of the app uses.
   const { data: profile } = await supabase
     .from("profiles")
     .select("interests, city, age, experience_level")
     .eq("id", user.id)
     .single();
 
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-  const conversationHistory = Array.isArray(history)
-    ? history.slice(-10).map((h: { role: string; content: string }) => ({
-        role: h.role === "assistant" ? ("assistant" as const) : ("user" as const),
-        content: h.content,
-      }))
-    : [];
-
   try {
-    const aiResponse = await anthropic.messages.create({
-      model: "claude-sonnet-5",
-      max_tokens: 700,
-      system: `${SYSTEM_PROMPT}\n\nAVAILABLE_OPPORTUNITIES:\n${JSON.stringify(catalog)}\n\nUSER_PROFILE (may be incomplete):\n${JSON.stringify(profile ?? {})}`,
-      messages: [...conversationHistory, { role: "user", content: message.slice(0, 1000) }],
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      systemInstruction: `${SYSTEM_PROMPT}\n\nAVAILABLE_OPPORTUNITIES:\n${JSON.stringify(catalog)}\n\nUSER_PROFILE (may be incomplete):\n${JSON.stringify(profile ?? {})}`,
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: RESPONSE_SCHEMA,
+      },
     });
 
-    const textBlock = aiResponse.content.find((b) => b.type === "text");
-    const raw = textBlock && "text" in textBlock ? textBlock.text : "";
-    if (!raw.trim()) {
-      throw new Error(
-        `No text content in AI response (got block types: ${aiResponse.content.map((b) => b.type).join(", ")})`
-      );
-    }
-    // Extract the JSON object between the first { and last } — more
-    // robust than stripping markdown fences, since it also handles the
-    // model adding a stray sentence before/after the JSON despite
-    // instructions not to, which fence-stripping alone doesn't cover.
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
+    const conversationHistory = Array.isArray(history)
+      ? history.slice(-10, -1).map((h: { role: string; content: string }) => ({
+          role: h.role === "assistant" ? "model" : "user",
+          parts: [{ text: h.content }],
+        }))
+      : [];
 
-    let parsed: { reply_al: string; opportunity_ids: string[] };
-    if (start === -1 || end === -1 || end < start) {
-      // The model responded in plain text instead of JSON (can happen
-      // on casual/slangy follow-ups). Rather than hard-failing the
-      // whole chat, degrade gracefully: show its plain-text reply as
-      // the message, just without any recommended cards attached.
-      console.warn("No JSON object found, falling back to plain text:", raw.slice(0, 300));
-      parsed = { reply_al: raw.trim(), opportunity_ids: [] };
-    } else {
-      const cleaned = raw.slice(start, end + 1);
-      try {
-        parsed = JSON.parse(cleaned) as { reply_al: string; opportunity_ids: string[] };
-      } catch (parseErr) {
-        console.warn("JSON.parse failed, falling back to plain text:", raw.slice(0, 300), parseErr);
-        parsed = { reply_al: raw.trim(), opportunity_ids: [] };
-      }
-    }
+    const chat = model.startChat({ history: conversationHistory });
+    const result = await chat.sendMessage(message.slice(0, 1000));
+    const parsed = JSON.parse(result.response.text()) as {
+      reply_al: string;
+      opportunity_ids: string[];
+    };
 
     // Safety filter: only ever return opportunities that are actually in
     // our fetched catalog, even if the model somehow returns a bad id.
