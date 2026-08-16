@@ -168,3 +168,76 @@ alter table profiles add column if not exists experience_level text
 alter table saved_opportunities add column if not exists application_status text
   default 'saved'
   check (application_status in ('saved', 'applying', 'applied'));
+
+
+-- ============================================================
+-- UPDATE: 18+ confirmation record
+-- Run this block once, after everything above already exists.
+-- Records that each user actively confirmed being 18+ at signup —
+-- worth having as an actual record, not just a UI checkbox that
+-- leaves no trace, in case this is ever asked about later.
+-- ============================================================
+
+alter table profiles add column if not exists confirmed_18_plus boolean default false;
+alter table profiles add column if not exists confirmed_18_plus_at timestamptz;
+
+-- Update the signup trigger to also record the 18+ confirmation from
+-- signup metadata. Using the trigger (not a client-side update after
+-- signup) means this works even when email confirmation is required
+-- and there's no active session yet immediately after signup.
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, full_name, confirmed_18_plus, confirmed_18_plus_at)
+  values (
+    new.id,
+    new.raw_user_meta_data->>'full_name',
+    coalesce((new.raw_user_meta_data->>'confirmed_18_plus')::boolean, false),
+    case when (new.raw_user_meta_data->>'confirmed_18_plus')::boolean is true then now() else null end
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+
+-- ============================================================
+-- UPDATE: per-user daily AI rate limit
+-- Run this block once, after everything above already exists.
+-- Protects the shared free-tier Gemini quota from being exhausted
+-- by one heavy or abusive user in a single day.
+-- ============================================================
+
+alter table profiles add column if not exists ai_calls_today int default 0;
+alter table profiles add column if not exists ai_calls_date date default current_date;
+
+
+-- ============================================================
+-- UPDATE: profile pictures
+-- Run this block once, after everything above already exists.
+-- Sets up a public storage bucket for avatar images, with rules so
+-- people can only upload/change/delete their OWN avatar, not anyone
+-- else's — enforced by storing each file under a folder named with
+-- the user's own ID.
+-- ============================================================
+
+alter table profiles add column if not exists avatar_url text;
+
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+create policy "Avatar images are publicly viewable"
+  on storage.objects for select
+  using (bucket_id = 'avatars');
+
+create policy "Users can upload their own avatar"
+  on storage.objects for insert
+  with check (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can update their own avatar"
+  on storage.objects for update
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
+create policy "Users can delete their own avatar"
+  on storage.objects for delete
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);

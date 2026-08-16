@@ -6,9 +6,13 @@ This version implements the MVP from the youth.al strategy document: structured 
 
 ## ⚖️ Before you launch anything real: read this
 
-The strategy document itself is explicit about this, and it's worth repeating here directly: **this is a product plan, not legal advice.** Before real users sign up, you need an Albanian-qualified lawyer or data-protection professional to review your actual data handling, terms of service, privacy notice, age policy, and use of a third-party AI provider (Anthropic) — Albania's Law No. 124/2024 substantially aligns with GDPR, and that's not optional paperwork, it's a real requirement. This app collects profile data (age, interests, experience) specifically to power the matching engine — treat that as a real responsibility, not a technicality. I can help you draft a starting-point privacy policy or terms of service when you're ready, but a professional needs to review it before it's real.
+The strategy document itself is explicit about this, and it's worth repeating here directly: **this is a product plan, not legal advice.** Before real users sign up, you need an Albanian-qualified lawyer or data-protection professional to review your actual data handling, terms of service, privacy notice, age policy, and use of a third-party AI provider (currently Google's Gemini API) — Albania's Law No. 124/2024 substantially aligns with GDPR, and that's not optional paperwork, it's a real requirement. This app collects profile data (age, interests, experience) specifically to power the matching engine — treat that as a real responsibility, not a technicality. Worth flagging specifically: Gemini's free tier terms allow using submitted prompts to improve Google's models — that needs to be disclosed plainly in your privacy policy, not glossed over. I can help you draft a starting-point privacy policy or terms of service when you're ready, but a professional needs to review it before it's real.
 
-One concrete decision from the doc worth making consciously, not by default: the doc recommends **starting 18+ only**, since anything younger triggers significantly higher legal obligations (EU Digital Services Act minor protections, age assurance, etc.). This app does **not** currently enforce an age gate — that's a deliberate choice left to you, since it changes onboarding UX and has real legal weight. Decide this explicitly before launch, don't let it happen by default.
+**An 18+ confirmation is implemented and enforced** — signup requires checking a box confirming the person is 18+, recorded in the database (`profiles.confirmed_18_plus`, `confirmed_18_plus_at`) with a real timestamp, not just a UI checkbox that leaves no trace. This is self-attestation (the person could technically lie), not verified ID checking — a bigger, separate undertaking if ever needed.
+
+**Per-user daily AI rate limit** — 40 AI requests/day per person (chat messages + AI parsing combined), tracked in `profiles.ai_calls_today`. This protects your shared free Gemini quota (~1,500/day for the *entire app*) from being exhausted by one heavy or abusive user before anyone else gets to use it that day. Adjust the `DAILY_AI_LIMIT` constant in `src/lib/rateLimit.ts` once you have a real sense of typical usage.
+
+**`/privacy` and `/terms` pages now actually exist on the site** — rendering the draft policy/terms content with a clear "draft, pending legal review" banner at the top of each. Linked from a new footer (this app had no footer at all before) and from the signup form. Still drafts — the banner is intentional and should stay until a lawyer finalizes them.
 
 ---
 
@@ -20,19 +24,26 @@ You have schema updates to run if you're coming from an earlier version — open
 
 Create a Supabase project, run the **entire** `supabase/schema.sql` (all three layers are in one file now: original schema, single-search pivot, eligibility engine), set up `.env.local` from `.env.local.example`, `npm install`, `npm run dev`.
 
-## Get an Anthropic API key (needed for AI-assisted submission)
+## Get a Gemini API key (needed for AI-assisted submission and chat)
 
-1. Go to [console.anthropic.com](https://console.anthropic.com) → sign up → **API Keys** → create a new key
-2. Add it to `.env.local`: `ANTHROPIC_API_KEY=sk-ant-...`
+**Heads up before you start:** Google renames and retires Gemini models unusually fast — faster than most other AI providers. If the chat or AI parsing ever suddenly starts erroring with something like "model not found" or "no longer available," that's almost certainly this, not a real bug. Fix: check the current model list at [ai.google.dev/gemini-api/docs/models](https://ai.google.dev/gemini-api/docs/models) and update the `model:` string in `src/app/api/chat/route.ts` and `src/app/api/parse-listing/route.ts` — that one line in each file is the only thing that ever needs to change.
+
+1. Go to [aistudio.google.com](https://aistudio.google.com) → sign in with a Google account → **Get API key** → create a new key
+2. Add it to `.env.local`: `GEMINI_API_KEY=...`
+3. **Genuinely free**, no credit card needed, generous daily limits for an early-stage app (roughly 1,500 requests/day on the free tier as of when this was written — check Google's current published limits, since these do change). One real tradeoff: on the free tier, Google's terms allow using your prompts to help train their models. That's worth disclosing in your privacy policy honestly, not hiding.
+4. Without this set, `/submit`'s AI parsing shows an error (manual entry still works), and the homepage chat shows a clear "not configured" message instead of crashing.
 3. Real, paid API — cheap per use, not free. Without it, `/submit` still works via manual entry.
 
 ## Deploying
 
-Push to GitHub, import on Vercel, add environment variables (including `ANTHROPIC_API_KEY` if you want AI parsing live), deploy.
+Push to GitHub, import on Vercel, add environment variables (including `GEMINI_API_KEY` if you want AI parsing and chat live), deploy.
 
 ---
 
 ## What's already working
+
+- **Forgot password, actually working** — this was a real, basic gap: `/login` now has a "Harrove fjalëkalimin?" link → `/forgot-password` (send reset email) → `/reset-password` (set a new one, with proper handling of the recovery link's timing so the form doesn't try to submit before the reset session is actually ready).
+- **Profile pictures** — real image upload via Supabase Storage, not just a UI mockup. Uploads are validated (image files only, 3MB max), stored under a per-user folder with storage-level security rules so people can only ever upload/change their *own* avatar (enforced by the database, not just hidden UI), and the photo now shows in the header dropdown and profile page.
 
 - **Profile settings** (`/profile`) — a real gap I found and fixed: previously there was no way to update your interests/city/age/experience after onboarding, and clicking your own name in the header instantly logged you out with no confirmation. Now there's an actual profile page, and the header has a proper dropdown (Profili / Dil) instead of an instant-logout button.
 - **Loading states everywhere** — every real page (search, swipe, saved, opportunities, submit, profile) now shows a branded spinner during navigation instead of a blank flash.

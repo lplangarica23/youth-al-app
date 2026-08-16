@@ -25,6 +25,7 @@ type ProfileData = {
   purpose: string | null;
   age: number | null;
   experience_level: "none" | "some" | "experienced" | null;
+  avatar_url: string | null;
 };
 
 export default function ProfileForm({
@@ -41,6 +42,9 @@ export default function ProfileForm({
   const [city, setCity] = useState<string | null>(initial?.city ?? null);
   const [interests, setInterests] = useState<Category[]>(initial?.interests ?? []);
   const [age, setAge] = useState<string>(initial?.age?.toString() ?? "");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(initial?.avatar_url ?? null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [experienceLevel, setExperienceLevel] = useState<"none" | "some" | "experienced" | null>(
     initial?.experience_level ?? null
   );
@@ -52,6 +56,54 @@ export default function ProfileForm({
     setInterests((prev) =>
       prev.includes(key) ? prev.filter((i) => i !== key) : [...prev, key]
     );
+  }
+
+  async function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setAvatarError("Zgjidh një skedar imazhi (JPG, PNG, etj.)");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      setAvatarError("Imazhi duhet të jetë nën 3MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setAvatarError(null);
+
+    // Stored under a folder named with the user's own ID — the storage
+    // RLS policies only allow uploading into your own folder, so this
+    // path structure is what actually enforces "only you can change
+    // your own avatar," not just the UI.
+    const filePath = `${userId}/${Date.now()}-${file.name}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      setAvatarError(uploadError.message);
+      setUploadingAvatar(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
+    const newUrl = urlData.publicUrl;
+
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({ avatar_url: newUrl })
+      .eq("id", userId);
+
+    setUploadingAvatar(false);
+    if (updateError) {
+      setAvatarError(updateError.message);
+      return;
+    }
+    setAvatarUrl(newUrl);
   }
 
   async function handleSave() {
@@ -84,6 +136,33 @@ export default function ProfileForm({
 
   return (
     <div className="flex flex-col gap-8">
+      <div>
+        <p className="mb-3 text-sm font-bold text-inksoft">Foto e profilit</p>
+        <div className="flex items-center gap-5">
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white/20 bg-panel">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-2xl">👤</span>
+            )}
+          </div>
+          <div>
+            <label className="btn-ghost cursor-pointer text-sm">
+              {uploadingAvatar ? "Duke ngarkuar..." : "Ndrysho foton"}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarChange}
+                disabled={uploadingAvatar}
+                className="hidden"
+              />
+            </label>
+            {avatarError && <p className="mt-2 text-xs text-pink">{avatarError}</p>}
+          </div>
+        </div>
+      </div>
+
       <div>
         <p className="mb-1 text-sm font-bold text-inksoft">Email</p>
         <p className="text-inkdim">{email}</p>

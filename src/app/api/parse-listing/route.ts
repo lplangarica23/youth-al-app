@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 import { withRetry } from "@/lib/retry";
+import { checkAndConsumeRateLimit } from "@/lib/rateLimit";
 
 const SYSTEM_PROMPT = `You extract structured job/volunteering/opportunity listings from raw, messy social media post text (often Albanian, sometimes mixed Albanian/English, often with emoji and hashtags).
 
@@ -57,6 +58,14 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Duhet të jesh i loguar." }, { status: 401 });
+  }
+
+  const rateLimit = await checkAndConsumeRateLimit(supabase, user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Ke arritur limitin ditor të kërkesave me AI. Provo përsëri nesër." },
+      { status: 429 }
+    );
   }
 
   const { text } = await request.json();

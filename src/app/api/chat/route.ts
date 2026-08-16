@@ -3,6 +3,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { createClient } from "@/lib/supabase/server";
 import { Opportunity } from "@/lib/types";
 import { withRetry } from "@/lib/retry";
+import { checkAndConsumeRateLimit } from "@/lib/rateLimit";
 
 const SYSTEM_PROMPT = `You are the youth.al assistant, helping young Albanians find real opportunities (volunteering, Erasmus+/jobs, NGO activities). You speak Albanian, warmly and simply, like a helpful friend — not a corporate chatbot.
 
@@ -36,6 +37,14 @@ export async function POST(request: Request) {
   // (free tiers have daily caps too).
   if (!user) {
     return NextResponse.json({ error: "Duhet të jesh i loguar." }, { status: 401 });
+  }
+
+  const rateLimit = await checkAndConsumeRateLimit(supabase, user.id);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Ke arritur limitin ditor të mesazheve me AI. Provo përsëri nesër." },
+      { status: 429 }
+    );
   }
 
   const { message, history } = await request.json();

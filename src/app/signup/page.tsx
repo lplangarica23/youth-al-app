@@ -8,6 +8,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [confirmedAge, setConfirmedAge] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -15,14 +16,27 @@ export default function SignupPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+
+    // Belt-and-suspenders: the checkbox is already `required` at the
+    // HTML level, but double-check here too rather than rely on that
+    // alone — this is the actual product-side enforcement of the 18+
+    // policy, not just a UI nicety.
+    if (!confirmedAge) {
+      setError("Duhet të konfirmosh që je mbi 18 vjeç për t'u regjistruar.");
+      return;
+    }
+
+    setLoading(true);
 
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName },
+        data: {
+          full_name: fullName,
+          confirmed_18_plus: true,
+        },
         emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
@@ -76,6 +90,33 @@ export default function SignupPage() {
           onChange={(e) => setPassword(e.target.value)}
           className="rounded-xl border-2 border-white/20 bg-panel px-4 py-3 text-ink focus:border-acid focus:outline-none"
         />
+
+        <label className="flex items-start gap-3 text-sm text-inksoft">
+          <input
+            type="checkbox"
+            required
+            checked={confirmedAge}
+            onChange={(e) => setConfirmedAge(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            Konfirmoj se jam të paktën <strong className="text-ink">18 vjeç</strong>. youth.al
+            është aktualisht i disponueshëm vetëm për përdorues 18+.
+          </span>
+        </label>
+
+        <p className="text-xs text-inkdim">
+          Duke u regjistruar, pranon{" "}
+          <Link href="/terms" className="underline hover:text-inksoft">
+            Kushtet e Përdorimit
+          </Link>{" "}
+          dhe{" "}
+          <Link href="/privacy" className="underline hover:text-inksoft">
+            Politikën e Privatësisë
+          </Link>
+          .
+        </p>
+
         {error && <p className="text-sm text-pink">{error}</p>}
         <button type="submit" disabled={loading} className="btn-primary justify-center">
           {loading ? "..." : "Regjistrohu"}
